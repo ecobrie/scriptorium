@@ -118,6 +118,15 @@
     display:grid;gap:22px;
     grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
   }
+  @media(max-width:560px){
+    .shelf{grid-template-columns:repeat(2,1fr);gap:14px;}
+    .tome{padding:16px 14px;border-radius:5px 10px 10px 5px;}
+    .tome .initial{font-size:44px;}
+    .tome .ttitle{font-size:15px;}
+    .tome .meta{font-size:10.5px;}
+    .tome.new .plus{font-size:34px;}
+    .tome.new .ttitle{font-size:13px;}
+  }
 
   .tome{
     position:relative;
@@ -825,6 +834,9 @@ function renderToolbar(){
     `<button class="el-btn" data-type="${t.id}">${t.label}</button>`
   ).join("");
   tb.querySelectorAll(".el-btn").forEach(btn=>{
+    // prevent the button from stealing focus from the line you're editing
+    btn.addEventListener("mousedown", e=> e.preventDefault());
+    btn.addEventListener("touchstart", e=> e.preventDefault(), {passive:false});
     btn.onclick = ()=>{ if(current) setType(focusIdx, btn.dataset.type); };
   });
   syncToolbar();
