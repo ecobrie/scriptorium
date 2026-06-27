@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#14121C">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -556,7 +556,7 @@ function renderLibrary(){
         <div class="gild"></div>
         <div class="initial">${initial}</div>
         <div class="ttitle">${esc(s.title||"Untitled Script")}</div>
-        <div class="meta">${words.toLocaleString()} words · ${fmtDate(s.updated)}</div>
+        <div class="meta">${words.toLocaleString()} words · ~${fmtPages(Math.round(estimatePages(s.elements)*10)/10)} pg · ${fmtDate(s.updated)}</div>
       </button>`;
   }
   shelf.innerHTML = html;
@@ -606,6 +606,8 @@ function openScript(id){
   $("#library").classList.remove("active");
   $("#editor").classList.add("active");
   $("#stage").scrollTop = 0;
+  // make this a back-navigable step so the device/browser back button returns to the library
+  try{ history.pushState({view:"editor", id}, ""); }catch(_){}
   setTimeout(()=> focusBlock(0, true), 40);
 }
 
@@ -853,19 +855,40 @@ function syncToolbarHL(){
 /* ============================================================
    PAGE COUNT (rough industry estimate ~55 lines/page)
    ============================================================ */
-function updatePageCount(){
+function estimatePages(elements){
   let lines = 0;
   const widths = {scene_heading:58, action:58, character:38, parenthetical:32, dialogue:35, transition:58};
-  for(const el of current.elements){
+  for(const el of (elements||[])){
     const w = widths[el.type]||58;
     const txt = (el.text||"");
     const wrapped = Math.max(1, Math.ceil(txt.length / w));
-    // blank line before scene headings / characters etc. (approx)
     const lead = (el.type==="scene_heading"||el.type==="character"||el.type==="transition"||el.type==="action")?1:0;
     lines += wrapped + lead;
   }
-  const pages = Math.max(1, Math.round(lines/55*10)/10);
-  $("#pageCount").textContent = "~" + (pages % 1 === 0 ? pages : pages.toFixed(1)) + " pg";
+  return Math.max(1, lines/55);
+}
+function fmtPages(n){ return (n % 1 === 0 ? n : n.toFixed(1)); }
+function updatePageCount(){
+  const pages = Math.round(estimatePages(current.elements)*10)/10;
+  $("#pageCount").textContent = "~" + fmtPages(pages) + " pg";
+  applyPageGuides();
+}
+// draw faint sheet-boundary lines down the page as it grows, so you can see roughly
+// where each printed page ends. Approximate guide, not exact pagination.
+function applyPageGuides(){
+  const page = $("#page");
+  if(!page) return;
+  const cs = getComputedStyle(page);
+  const ppi = parseFloat(cs.getPropertyValue("--ppi")) || 72;
+  const sheetPx = 9 * ppi;            // usable text height per sheet (11in − 1in − 1in)
+  const top = parseFloat(cs.paddingTop) || ppi;
+  const c = "rgba(120,90,40,.28)";
+  // a top texture layer, plus an offset repeating layer that draws one hairline per sheet
+  page.style.backgroundImage =
+    `linear-gradient(180deg,rgba(0,0,0,.015),transparent 120px),` +
+    `repeating-linear-gradient(to bottom, transparent 0, transparent ${sheetPx - 1}px, ${c} ${sheetPx - 1}px, ${c} ${sheetPx}px)`;
+  page.style.backgroundPosition = `0 0, 0 ${top}px`;
+  page.style.backgroundRepeat = "no-repeat, repeat";
 }
 
 /* ============================================================
@@ -1366,6 +1389,16 @@ function cloudDelete(id){
   userScriptsRef().doc(id).delete().catch(err=> console.warn("cloud delete failed", err));
 }
 
+
+$("#backBtn").onclick = ()=>{
+  // if we pushed a history step when opening, go back through it (keeps device back in sync)
+  if(history.state && history.state.view==="editor"){ history.back(); }
+  else backToLibrary();
+};
+// device / browser back button returns to the library instead of leaving the app
+window.addEventListener("popstate", ()=>{
+  if($("#editor").classList.contains("active")) backToLibrary();
+});
 
 $("#castBtn").onclick = openPanel;
 $("#exportBtn").onclick = exportPDF;
