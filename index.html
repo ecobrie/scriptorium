@@ -145,6 +145,11 @@
   }
   .tome:hover{transform:translateY(-4px);box-shadow:0 26px 60px rgba(0,0,0,.5);}
   .tome:focus-visible{outline:2px solid var(--gold-bright);outline-offset:3px;}
+  .tome .kindtag{
+    position:absolute;top:12px;right:12px;
+    font-size:9.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    opacity:.9;
+  }
   .tome .initial{
     font-family:var(--display);font-weight:700;
     font-size:64px;line-height:1;color:var(--gold);
@@ -261,6 +266,12 @@
   .block.parenthetical{margin-left:calc(1.6 * var(--ppi) * 1px);margin-right:calc(1 * var(--ppi) * 1px);color:#33302b;}
   .block.dialogue{margin-left:calc(1 * var(--ppi) * 1px);margin-right:calc(1.5 * var(--ppi) * 1px);}
   .block.transition{text-transform:uppercase;text-align:right;margin-top:1.2em;font-weight:700;letter-spacing:.03em;}
+  /* short story (prose) + guide (heading/note) */
+  .block.prose{margin-top:.9em;}
+  .block.prose:first-child{margin-top:0;}
+  .block.heading{text-transform:uppercase;font-weight:700;margin-top:1.5em;letter-spacing:.04em;}
+  .block.heading:first-child{margin-top:0;}
+  .block.note{margin-top:.5em;}
   @media(max-width:560px){
     .block.character{margin-left:30%;}
     .block.parenthetical{margin-left:20%;margin-right:6%;}
@@ -449,15 +460,31 @@
 "use strict";
 
 /* ---------- constants ---------- */
-const TYPES = [
-  {id:"scene_heading", label:"Scene", ph:"INT. LOCATION - DAY"},
-  {id:"action",        label:"Action", ph:"Describe what we see…"},
-  {id:"character",     label:"Character", ph:"NAME"},
-  {id:"parenthetical", label:"Paren.", ph:"(beat)"},
-  {id:"dialogue",      label:"Dialogue", ph:"What they say…"},
-  {id:"transition",    label:"Transition", ph:"CUT TO:"},
-];
-const TYPE_IDS = TYPES.map(t=>t.id);
+const TYPE_META = {
+  // screenplay
+  scene_heading: {label:"Scene", ph:"INT. LOCATION - DAY"},
+  action:        {label:"Action", ph:"Describe what we see…"},
+  character:     {label:"Character", ph:"NAME"},
+  parenthetical: {label:"Paren.", ph:"(beat)"},
+  dialogue:      {label:"Dialogue", ph:"What they say…"},
+  transition:    {label:"Transition", ph:"CUT TO:"},
+  // prose (short story)
+  prose:         {label:"Text", ph:"Once upon a time…"},
+  // guide / outline
+  heading:       {label:"Heading", ph:"SECTION (e.g. CHARACTERS)"},
+  note:          {label:"Note", ph:"Jot details here…"},
+};
+// which block types each kind of work uses (first = default for a new work)
+const KIND_TYPES = {
+  screenplay: ["scene_heading","action","character","parenthetical","dialogue","transition"],
+  story:      ["prose"],
+  guide:      ["heading","note"],
+};
+const KIND_META = {
+  screenplay: {label:"Screenplay", accent:"var(--gold)", noun:"Screenplay"},
+  story:      {label:"Short Story", accent:"var(--jade)", noun:"Short Story"},
+  guide:      {label:"Guide",       accent:"#6E8FB8",     noun:"Guide"},
+};
 // what pressing Enter after this type creates next
 const NEXT_ON_ENTER = {
   scene_heading:"action",
@@ -466,7 +493,12 @@ const NEXT_ON_ENTER = {
   parenthetical:"dialogue",
   dialogue:"action",
   transition:"scene_heading",
+  prose:"prose",
+  heading:"note",
+  note:"note",
 };
+function kindOf(s){ return (s && s.kind) || "screenplay"; }
+function typesFor(s){ return KIND_TYPES[kindOf(s)] || KIND_TYPES.screenplay; }
 const STORE_KEY = "scriptorium_v1";
 
 /* ============================================================
@@ -496,10 +528,20 @@ let didInitialMerge = false;
 const cloudPushTimers = {}; // per-script debounce
 
 /* ---------- persistence ---------- */
+function normalizeWork(s){
+  if(!s.kind) s.kind = "screenplay";
+  if(typeof s.folder !== "string") s.folder = "";
+  if(!Array.isArray(s.elements) || !s.elements.length){
+    s.elements = [{type: typesFor(s)[0], text:""}];
+  }
+  if(!s.characters) s.characters = [];
+  if(!s.locations) s.locations = [];
+  return s;
+}
 function load(){
   try{
     const raw = localStorage.getItem(STORE_KEY);
-    if(raw){ const d = JSON.parse(raw); if(d && Array.isArray(d.scripts)) return d; }
+    if(raw){ const d = JSON.parse(raw); if(d && Array.isArray(d.scripts)){ d.scripts.forEach(normalizeWork); return d; } }
   }catch(e){ console.warn("load failed", e); }
   return { scripts:[] };
 }
@@ -542,7 +584,11 @@ function renderLibrary(){
   let html = `
     <button class="tome new" id="newTome">
       <div class="plus">+</div>
-      <div class="ttitle">Begin a new script</div>
+      <div class="ttitle">New screenplay</div>
+    </button>
+    <button class="tome new" id="newStoryTome" style="border-left-color:var(--jade);">
+      <div class="plus" style="color:var(--jade);">+</div>
+      <div class="ttitle">New short story</div>
     </button>
     <button class="tome new" id="openTome" style="border-left-color:var(--gold);">
       <div class="plus" style="color:var(--gold);">&#8595;</div>
@@ -551,16 +597,19 @@ function renderLibrary(){
   for(const s of scripts){
     const initial = esc((s.title||"U").trim().charAt(0).toUpperCase() || "U");
     const words = countWords(s);
+    const km = KIND_META[kindOf(s)] || KIND_META.screenplay;
     html += `
-      <button class="tome" data-id="${s.id}">
+      <button class="tome" data-id="${s.id}" style="border-left-color:${km.accent};">
         <div class="gild"></div>
+        <div class="kindtag" style="color:${km.accent};">${km.label}</div>
         <div class="initial">${initial}</div>
-        <div class="ttitle">${esc(s.title||"Untitled Script")}</div>
+        <div class="ttitle">${esc(s.title||"Untitled")}</div>
         <div class="meta">${words.toLocaleString()} words · ~${fmtPages(Math.round(estimatePages(s.elements)*10)/10)} pg · ${fmtDate(s.updated)}</div>
       </button>`;
   }
   shelf.innerHTML = html;
-  $("#newTome").onclick = createScript;
+  $("#newTome").onclick = ()=> createScript("screenplay");
+  $("#newStoryTome").onclick = ()=> createScript("story");
   $("#openTome").onclick = ()=> $("#importFile").click();
   shelf.querySelectorAll(".tome[data-id]").forEach(el=>{
     el.onclick = ()=> openScript(el.dataset.id);
@@ -576,11 +625,16 @@ function countWords(s){
 /* ============================================================
    SCRIPT lifecycle
    ============================================================ */
-function createScript(){
+function createScript(kind){
+  kind = kind || "screenplay";
+  const firstType = (KIND_TYPES[kind] || KIND_TYPES.screenplay)[0];
+  const defaultTitle = kind==="story" ? "Untitled Story" : kind==="guide" ? "Untitled Guide" : "Untitled Script";
   const s = {
     id: uid(),
-    title: "Untitled Script",
-    elements: [{type:"scene_heading", text:""}],
+    kind,
+    folder: "",
+    title: defaultTitle,
+    elements: [{type:firstType, text:""}],
     characters: [],
     locations: [],
     created: Date.now(),
@@ -596,9 +650,7 @@ function createScript(){
 function openScript(id){
   current = db.scripts.find(s=>s.id===id);
   if(!current) return;
-  if(!current.elements || !current.elements.length) current.elements=[{type:"scene_heading",text:""}];
-  if(!current.characters) current.characters=[];
-  if(!current.locations) current.locations=[];
+  normalizeWork(current);
   $("#scriptTitle").value = current.title || "";
   focusIdx = 0;
   renderPage();
@@ -648,7 +700,7 @@ function makeBlock(el,i){
   attachBlockHandlers(div);
   return div;
 }
-function phFor(type){ return (TYPES.find(t=>t.id===type)||{}).ph || ""; }
+function phFor(type){ return (TYPE_META[type]||{}).ph || ""; }
 
 function blocks(){ return [...$("#page").querySelectorAll(".block")]; }
 
@@ -814,10 +866,13 @@ function setType(i, type){
   b.focus(); placeCaretEnd(b);
 }
 function cycleType(i, dir){
+  const ids = typesFor(current);
+  if(ids.length < 2) return; // single-type kinds (e.g. short story) have nothing to cycle
   const cur = current.elements[i].type;
-  let idx = TYPE_IDS.indexOf(cur);
-  idx = (idx + dir + TYPE_IDS.length) % TYPE_IDS.length;
-  setType(i, TYPE_IDS[idx]);
+  let idx = ids.indexOf(cur);
+  if(idx < 0) idx = 0;
+  idx = (idx + dir + ids.length) % ids.length;
+  setType(i, ids[idx]);
 }
 
 /* keep DOM text -> model in sync (e.g., before save/leave) */
@@ -832,8 +887,12 @@ function syncFromDOM(){
    ============================================================ */
 function renderToolbar(){
   const tb = $("#toolbar");
-  tb.innerHTML = TYPES.map((t,n)=>
-    `<button class="el-btn" data-type="${t.id}">${t.label}</button>`
+  const ids = typesFor(current);
+  // single-type kinds (short story) need no formatting toolbar — hide it for a clean prose page
+  if(ids.length < 2){ tb.style.display = "none"; tb.innerHTML = ""; return; }
+  tb.style.display = "";
+  tb.innerHTML = ids.map(id=>
+    `<button class="el-btn" data-type="${id}">${(TYPE_META[id]||{}).label||id}</button>`
   ).join("");
   tb.querySelectorAll(".el-btn").forEach(btn=>{
     // prevent the button from stealing focus from the line you're editing
@@ -857,7 +916,7 @@ function syncToolbarHL(){
    ============================================================ */
 function estimatePages(elements){
   let lines = 0;
-  const widths = {scene_heading:58, action:58, character:38, parenthetical:32, dialogue:35, transition:58};
+  const widths = {scene_heading:58, action:58, character:38, parenthetical:32, dialogue:35, transition:58, prose:60, heading:58, note:60};
   for(const el of (elements||[])){
     const w = widths[el.type]||58;
     const txt = (el.text||"");
@@ -1040,21 +1099,29 @@ function hideAC(){ $("#ac").classList.remove("show"); acItems=[]; acSel=-1; acBl
    Rendered into a hidden iframe so the print is clean and reliable.
    ============================================================ */
 function buildPrintHTML(){
-  const title = esc((current.title||"Untitled Script").toUpperCase());
-  let body = `<div class="pp titlepage">
+  const kind = kindOf(current);
+  const title = esc((current.title||"Untitled").toUpperCase());
+  const titlePage = `<div class="pp titlepage">
       <div class="ptitle">${title}</div>
-      <div class="pby">written by</div>
+      ${kind==="screenplay" ? `<div class="pby">written by</div>` : ``}
     </div>`;
+
   let lines = "";
   for(const el of current.elements){
     let txt = el.text||"";
-    if(["scene_heading","character","transition"].includes(el.type)) txt = txt.toUpperCase();
+    if(["scene_heading","character","transition","heading"].includes(el.type)) txt = txt.toUpperCase();
     lines += `<div class="pline p-${el.type}">${esc(txt)||"&nbsp;"}</div>`;
   }
-  body += `<div class="pp">${lines}</div>`;
+  const body = titlePage + `<div class="pp">${lines}</div>`;
+
+  // screenplay uses the 1.5in left margin + element indents; prose/guide use even 1in margins
+  const pageRule = kind==="screenplay"
+    ? `@page{size:letter;margin:1in 1in 1in 1.5in;}`
+    : `@page{size:letter;margin:1in;}`;
+
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
   <style>
-    @page{size:letter;margin:1in 1in 1in 1.5in;}
+    ${pageRule}
     *{box-sizing:border-box;}
     html,body{margin:0;padding:0;background:#fff;color:#000;}
     body{font-family:'Courier New',Courier,monospace;font-size:12pt;line-height:1;}
@@ -1070,6 +1137,9 @@ function buildPrintHTML(){
     .p-parenthetical{margin-left:1.6in;margin-right:1in;}
     .p-dialogue{margin-left:1in;margin-right:1.5in;}
     .p-transition{text-transform:uppercase;text-align:right;margin-top:12pt;}
+    .p-prose{margin-top:12pt;line-height:1.5;}
+    .p-heading{text-transform:uppercase;font-weight:bold;margin-top:18pt;}
+    .p-note{margin-top:6pt;line-height:1.4;}
   </style></head><body>${body}</body></html>`;
 }
 function exportPDF(){
@@ -1225,6 +1295,8 @@ function importFountainText(text, filename){
   }
   const s = {
     id: uid(),
+    kind: "screenplay",
+    folder: "",
     title: parsed.title,
     elements: parsed.elements,
     characters: [], locations: [],
@@ -1312,6 +1384,8 @@ function cleanScript(s){
   // only durable fields go to the cloud (drop transient _autoChars etc.)
   return {
     id: s.id,
+    kind: s.kind || "screenplay",
+    folder: s.folder || "",
     title: s.title || "Untitled Script",
     elements: (s.elements||[]).map(e=>({type:e.type, text:e.text||""})),
     characters: s.characters || [],
@@ -1362,6 +1436,7 @@ function stopCloudSync(){
 
 // merge one remote script into local; returns true if local changed
 function applyRemoteScript(remote){
+  normalizeWork(remote);
   const i = db.scripts.findIndex(s=>s.id===remote.id);
   if(i<0){ db.scripts.push(remote); return true; }
   const local = db.scripts[i];
