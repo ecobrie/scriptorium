@@ -113,13 +113,24 @@
   }
 
   .shelf-wrap{flex:1;overflow-y:auto;padding:8px 20px 120px;}
-  .shelf{
-    max-width:1040px;margin:0 auto;
+  .shelf{max-width:1040px;margin:0 auto;}
+  .shelf-grid{
     display:grid;gap:22px;
     grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
   }
+  .group-head{
+    display:flex;align-items:center;gap:12px;
+    margin:30px 2px 16px;
+  }
+  .group-head:first-child{margin-top:8px;}
+  .group-head .gname{
+    font-family:var(--display);font-size:17px;font-weight:600;color:var(--gold);
+    letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;
+  }
+  .group-head .gcount{font-size:12px;color:var(--muted);}
+  .group-head .gline{flex:1;height:1px;background:linear-gradient(90deg,rgba(203,166,92,.4),transparent);}
   @media(max-width:560px){
-    .shelf{grid-template-columns:repeat(2,1fr);gap:14px;}
+    .shelf-grid{grid-template-columns:repeat(2,1fr);gap:14px;}
     .tome{padding:16px 14px;border-radius:5px 10px 10px 5px;}
     .tome .initial{font-size:44px;}
     .tome .ttitle{font-size:15px;}
@@ -430,6 +441,14 @@
     </button>
   </div>
   <div class="panel-body">
+    <div class="grp-title">Folder</div>
+    <div class="addrow">
+      <input id="folderInput" list="folderOptions" placeholder="Unfiled — type a folder name" maxlength="60">
+      <button id="folderClear" title="Remove from folder" aria-label="Remove from folder">×</button>
+    </div>
+    <datalist id="folderOptions"></datalist>
+    <p class="emptynote" style="margin:2px 2px 0;line-height:1.5;">Type a name to file this work into a folder (it'll be created if new). Works in the same folder are grouped together on the shelf.</p>
+
     <div class="grp-title">Characters</div>
     <div id="charList"></div>
     <div class="addrow">
@@ -578,36 +597,58 @@ function fmtDate(ts){
 /* ============================================================
    LIBRARY
    ============================================================ */
+function tomeHTML(s){
+  const initial = esc((s.title||"U").trim().charAt(0).toUpperCase() || "U");
+  const words = countWords(s);
+  const km = KIND_META[kindOf(s)] || KIND_META.screenplay;
+  return `
+    <button class="tome" data-id="${s.id}" style="border-left-color:${km.accent};">
+      <div class="gild"></div>
+      <div class="kindtag" style="color:${km.accent};">${km.label}</div>
+      <div class="initial">${initial}</div>
+      <div class="ttitle">${esc(s.title||"Untitled")}</div>
+      <div class="meta">${words.toLocaleString()} words · ~${fmtPages(Math.round(estimatePages(s.elements)*10)/10)} pg · ${fmtDate(s.updated)}</div>
+    </button>`;
+}
 function renderLibrary(){
   const shelf = $("#shelf");
   const scripts = [...db.scripts].sort((a,b)=>(b.updated||0)-(a.updated||0));
-  let html = `
-    <button class="tome new" id="newTome">
-      <div class="plus">+</div>
-      <div class="ttitle">New screenplay</div>
-    </button>
-    <button class="tome new" id="newStoryTome" style="border-left-color:var(--jade);">
-      <div class="plus" style="color:var(--jade);">+</div>
-      <div class="ttitle">New short story</div>
-    </button>
-    <button class="tome new" id="openTome" style="border-left-color:var(--gold);">
-      <div class="plus" style="color:var(--gold);">&#8595;</div>
-      <div class="ttitle">Open a script<br><span style="font-size:12px;color:var(--muted);">from a .fountain file</span></div>
-    </button>`;
-  for(const s of scripts){
-    const initial = esc((s.title||"U").trim().charAt(0).toUpperCase() || "U");
-    const words = countWords(s);
-    const km = KIND_META[kindOf(s)] || KIND_META.screenplay;
-    html += `
-      <button class="tome" data-id="${s.id}" style="border-left-color:${km.accent};">
-        <div class="gild"></div>
-        <div class="kindtag" style="color:${km.accent};">${km.label}</div>
-        <div class="initial">${initial}</div>
-        <div class="ttitle">${esc(s.title||"Untitled")}</div>
-        <div class="meta">${words.toLocaleString()} words · ~${fmtPages(Math.round(estimatePages(s.elements)*10)/10)} pg · ${fmtDate(s.updated)}</div>
-      </button>`;
+
+  const actions = `
+    <div class="shelf-grid">
+      <button class="tome new" id="newTome">
+        <div class="plus">+</div>
+        <div class="ttitle">New screenplay</div>
+      </button>
+      <button class="tome new" id="newStoryTome" style="border-left-color:var(--jade);">
+        <div class="plus" style="color:var(--jade);">+</div>
+        <div class="ttitle">New short story</div>
+      </button>
+      <button class="tome new" id="openTome" style="border-left-color:var(--gold);">
+        <div class="plus" style="color:var(--gold);">&#8595;</div>
+        <div class="ttitle">Open a script<br><span style="font-size:12px;color:var(--muted);">from a .fountain file</span></div>
+      </button>
+    </div>`;
+
+  // group by folder; unfiled first, then named folders alphabetically
+  const folders = [...new Set(scripts.map(s=>s.folder||""))];
+  const named = folders.filter(f=>f).sort((a,b)=>a.localeCompare(b));
+  const order = (folders.includes("") ? [""] : []).concat(named);
+
+  let groups = "";
+  for(const f of order){
+    const items = scripts.filter(s=>(s.folder||"")===f);
+    if(!items.length) continue;
+    const head = `
+      <div class="group-head">
+        <span class="gname">${f ? esc(f) : "Unfiled"}</span>
+        <span class="gcount">${items.length}</span>
+        <span class="gline"></span>
+      </div>`;
+    groups += head + `<div class="shelf-grid">` + items.map(tomeHTML).join("") + `</div>`;
   }
-  shelf.innerHTML = html;
+
+  shelf.innerHTML = actions + groups;
   $("#newTome").onclick = ()=> createScript("screenplay");
   $("#newStoryTome").onclick = ()=> createScript("story");
   $("#openTome").onclick = ()=> $("#importFile").click();
@@ -989,8 +1030,24 @@ function allLocations(){
 /* ============================================================
    CAST & PLACES panel
    ============================================================ */
-function openPanel(){ extractEntities(); renderPanel(); $("#scrim").classList.add("show"); $("#panel").classList.add("show"); }
+function openPanel(){ extractEntities(); renderPanel(); renderFolderField(); $("#scrim").classList.add("show"); $("#panel").classList.add("show"); }
 function closePanel(){ $("#scrim").classList.remove("show"); $("#panel").classList.remove("show"); }
+
+function allFolders(){
+  return [...new Set(db.scripts.map(s=>(s.folder||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+}
+function renderFolderField(){
+  $("#folderInput").value = current.folder || "";
+  $("#folderOptions").innerHTML = allFolders().map(f=>`<option value="${esc(f)}"></option>`).join("");
+}
+function setFolder(name){
+  const v = (name||"").trim();
+  if((current.folder||"") === v) return;
+  current.folder = v;
+  current.updated = Date.now();
+  save(); cloudPush(current, true);
+  toast(v ? "Filed under “" + v + "”" : "Removed from folder");
+}
 
 function renderPanel(){
   const manualChars = new Set((current.characters||[]).map(x=>x.toUpperCase()));
@@ -1490,6 +1547,9 @@ $("#scriptTitle").addEventListener("keydown", e=>{
 });
 
 $("#charAdd").onclick = ()=> addEntity("char");
+$("#folderInput").addEventListener("change", e=> setFolder(e.target.value));
+$("#folderInput").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); setFolder(e.target.value); e.target.blur(); } });
+$("#folderClear").onclick = ()=>{ $("#folderInput").value=""; setFolder(""); };
 $("#locAdd").onclick  = ()=> addEntity("loc");
 $("#charInput").addEventListener("keydown", e=>{ if(e.key==="Enter") addEntity("char"); });
 $("#locInput").addEventListener("keydown",  e=>{ if(e.key==="Enter") addEntity("loc"); });
