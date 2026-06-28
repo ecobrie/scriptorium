@@ -267,7 +267,8 @@
     min-height:1.55em;padding:1px 0;
     caret-color:var(--jade);
   }
-  .block:empty::before{
+  .block:empty:focus::before,
+  .page > .block:only-child:empty::before{
     content:attr(data-ph);color:rgba(27,24,20,.32);pointer-events:none;
   }
   .block.scene_heading{text-transform:uppercase;font-weight:700;margin-top:1.5em;letter-spacing:.01em;}
@@ -464,6 +465,7 @@
     </div>
 
     <div class="grp-title">Backup &amp; Sharing</div>
+    <button class="ghost" id="copyAll" style="width:100%;text-align:center;margin-bottom:8px;">Copy whole work to clipboard</button>
     <button class="ghost" id="saveFountain" style="width:100%;text-align:center;margin-bottom:8px;">Save as .fountain file</button>
     <p class="emptynote" style="margin:2px 2px 0;line-height:1.5;">A plain-text screenplay in the standard <b>Fountain</b> format — opens in any screenwriting app. Save it into your Google&nbsp;Drive folder to sync between devices, then use “Open a script” on the shelf to load it on the other one.</p>
 
@@ -624,6 +626,10 @@ function renderLibrary(){
         <div class="plus" style="color:var(--jade);">+</div>
         <div class="ttitle">New short story</div>
       </button>
+      <button class="tome new" id="newGuideTome" style="border-left-color:#6E8FB8;">
+        <div class="plus" style="color:#6E8FB8;">+</div>
+        <div class="ttitle">New guide<br><span style="font-size:12px;color:var(--muted);">plan a story</span></div>
+      </button>
       <button class="tome new" id="openTome" style="border-left-color:var(--gold);">
         <div class="plus" style="color:var(--gold);">&#8595;</div>
         <div class="ttitle">Open a script<br><span style="font-size:12px;color:var(--muted);">from a .fountain file</span></div>
@@ -651,6 +657,7 @@ function renderLibrary(){
   shelf.innerHTML = actions + groups;
   $("#newTome").onclick = ()=> createScript("screenplay");
   $("#newStoryTome").onclick = ()=> createScript("story");
+  $("#newGuideTome").onclick = ()=> createScript("guide");
   $("#openTome").onclick = ()=> $("#importFile").click();
   shelf.querySelectorAll(".tome[data-id]").forEach(el=>{
     el.onclick = ()=> openScript(el.dataset.id);
@@ -1158,12 +1165,13 @@ function hideAC(){ $("#ac").classList.remove("show"); acItems=[]; acSel=-1; acBl
 function buildPrintHTML(){
   const kind = kindOf(current);
   const title = esc((current.title||"Untitled").toUpperCase());
-  const titlePage = `<div class="pp titlepage">
+  // screenplays/stories get a manuscript title page; a guide is a working doc, so title goes inline
+  const titlePage = kind==="guide" ? `` : `<div class="pp titlepage">
       <div class="ptitle">${title}</div>
       ${kind==="screenplay" ? `<div class="pby">written by</div>` : ``}
     </div>`;
 
-  let lines = "";
+  let lines = kind==="guide" ? `<div class="pline p-guidetitle">${title}</div>` : "";
   for(const el of current.elements){
     let txt = el.text||"";
     if(["scene_heading","character","transition","heading"].includes(el.type)) txt = txt.toUpperCase();
@@ -1195,6 +1203,7 @@ function buildPrintHTML(){
     .p-dialogue{margin-left:1in;margin-right:1.5in;}
     .p-transition{text-transform:uppercase;text-align:right;margin-top:12pt;}
     .p-prose{margin-top:12pt;line-height:1.5;}
+    .p-guidetitle{text-transform:uppercase;font-weight:bold;font-size:14pt;letter-spacing:.05em;margin-bottom:18pt;text-align:center;}
     .p-heading{text-transform:uppercase;font-weight:bold;margin-top:18pt;}
     .p-note{margin-top:6pt;line-height:1.4;}
   </style></head><body>${body}</body></html>`;
@@ -1555,6 +1564,27 @@ $("#charInput").addEventListener("keydown", e=>{ if(e.key==="Enter") addEntity("
 $("#locInput").addEventListener("keydown",  e=>{ if(e.key==="Enter") addEntity("loc"); });
 
 $("#saveFountain").onclick = saveFountainFile;
+$("#copyAll").onclick = ()=>{
+  if(!current) return;
+  syncFromDOM();
+  const text = (current.elements||[]).map(e=> e.text||"").join("\n").replace(/\n{3,}/g,"\n\n").trim();
+  const done = ()=> toast("Copied — paste anywhere");
+  const fail = ()=> toast("Couldn't access clipboard");
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(()=>fallbackCopy(text)?done():fail());
+  }else{
+    fallbackCopy(text) ? done() : fail();
+  }
+};
+function fallbackCopy(text){
+  try{
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position="fixed"; ta.style.opacity="0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove(); return ok;
+  }catch(_){ return false; }
+}
 $("#importFile").addEventListener("change", e=>{
   const file = e.target.files && e.target.files[0];
   if(!file) return;
